@@ -145,7 +145,6 @@ pub struct LiveryView {
     used: Vec<[u8; 3]>,
     pub name: String,
     pub on_bus: String,
-    pub logo_path: String,
     pub mirror: bool,
     pub before: bool,
     undo: Vec<Vec<Layer>>,
@@ -346,7 +345,7 @@ fn lay_out(t: &showroom::PaintPart, scheme: Option<usize>, root: &std::path::Pat
         }
     }
     let per_m = (texels as f32 / world_area.max(0.01)).sqrt();
-    let about = format!("{} · {w} × {h} · {:.0} {}", if scheme.is_some() { "Begun from the chosen livery" } else { "Begun from the model's own" }, per_m, "texels/m");
+    let about = format!("{} · {w} × {h} · {:.0} {}", omsi_ui::tr(if scheme.is_some() { "Begun from the chosen livery" } else { "Begun from the model's own" }), per_m, omsi_ui::tr("texels/m"));
     let ctc_dir = vt.model.ctc.first().map(|c| omsi_cfg::resolve_path(vt.def.dir(), &c.path));
     let mut also: Vec<omsi_render::TextureId> = t.slots.iter().filter(|(mi, slot, id)| *id != tex && vt.meshes[*mi].materials.get(*slot).is_some_and(|m| m.texture.trim().eq_ignore_ascii_case(file.trim()))).map(|s| s.2).collect();
     also.sort_unstable();
@@ -947,7 +946,8 @@ fn add_layer(l: &mut Launcher, kind: Kind) {
             v.target = 2;
         }
         Kind::Logo => {
-            let path = v.logo_path.trim().trim_matches('"').to_string();
+            // (the system's own file dialog: a PNG with transparency keeps the bus around it)
+            let Some(path) = omsi_launcher_lib::pick_file("A logo (PNG, JPG)") else { return };
             match image::open(&path) {
                 Ok(img) => {
                     v.next_image += 1;
@@ -955,8 +955,8 @@ fn add_layer(l: &mut Launcher, kind: Kind) {
                     layer.image = v.next_image;
                     layer.name = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Logo".into());
                 }
-                Err(_) => {
-                    l.state.set_status(omsi_ui::tr("Type the path of a picture (PNG, JPG) under Logo first").to_string(), true);
+                Err(e) => {
+                    l.state.set_status(format!("{}: {e}", omsi_ui::tr("The logo cannot be read")), true);
                     return;
                 }
             }
@@ -1217,8 +1217,7 @@ fn right_panel(l: &mut Launcher, r: Rect) {
             y += 40.0;
             l.ui.label(Rect::new(inner.x, y, inner.w, 18.0), "Logo");
             y += 22.0;
-            l.ui.text_input("livery-logo", Rect::new(inner.x, y, inner.w - 44.0, 32.0), &mut l.livery.logo_path, "C:\\…\\logo.png", Some("image"));
-            if l.ui.button("livery-logo-add", Rect::new(inner.right() - 38.0, y, 38.0, 32.0), "", Some("add"), ButtonKind::Normal) {
+            if l.ui.button("livery-logo", Rect::new(inner.x, y, inner.w, 32.0), "Choose a logo…", Some("upload"), ButtonKind::Normal) {
                 add_layer(l, Kind::Logo);
             }
             y += 42.0;

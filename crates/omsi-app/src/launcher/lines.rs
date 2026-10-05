@@ -662,7 +662,7 @@ fn timetable_tab(l: &mut Launcher, r: Rect) {
         }
         y += 6.0;
     }
-    l.ui.text_in(&format!("{total} {} {}", omsi_ui::tr("trips a week of days"), omsi_ui::tr("per direction")), Rect::new(r.x, r.bottom() - 20.0, r.w, 16.0), 11.0, Weight::Medium, TEXT_DIM(), Align::Left);
+    l.ui.text_in(&format!("{total} {}", omsi_ui::tr("trips in all, each way")), Rect::new(r.x, r.bottom() - 20.0, r.w, 16.0), 11.0, Weight::Medium, TEXT_DIM(), Align::Left);
 }
 
 #[cfg(test)]
