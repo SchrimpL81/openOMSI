@@ -9,6 +9,7 @@
 //! functions `omsi-launcher --cli` offers a terminal.
 
 pub(crate) mod drive;
+mod home;
 pub(crate) mod mapview;
 pub mod mobile;
 pub mod phone;
@@ -40,6 +41,7 @@ use winit::window::{Window, WindowId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Page {
+    Home,
     Drive,
     Multiplayer,
     Profile,
@@ -52,7 +54,8 @@ pub enum Page {
     Setup,
 }
 
-const PAGES: [(Page, &str, &str); 10] = [
+const PAGES: [(Page, &str, &str); 11] = [
+    (Page::Home, "Home", "home"),
     (Page::Drive, "Drive", "directions_bus"),
     (Page::Multiplayer, "Multiplayer", "groups"),
     (Page::Profile, "Profile", "badge"),
@@ -88,7 +91,8 @@ impl Clipboard {
 }
 
 /// Width of the left rail (points).
-pub const RAIL_W: f32 = 236.0;
+/// Height of the bar along the top.
+pub const BAR_H: f32 = 56.0;
 
 /// How often the launcher made its device again after losing it (see `recover_device`).
 static LAUNCHER_RECOVERIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -104,6 +108,10 @@ pub struct Launcher {
     showroom: showroom::Showroom,
     page: Page,
     page_anim: f32,
+    /// The bus on the bar's edge after a page was gone to: 0 at the start, 1 arrived.
+    page_run: f32,
+    /// The Home page asked for the driver's record once.
+    home_asked: bool,
     pub drive: drive::DriveView,
     /// The launcher made for a phone (see `phone`).
     pub phone: phone::PhoneView,
@@ -182,8 +190,10 @@ impl Launcher {
         ui: Ui::new(),
         state: state::State::new(),
         showroom: showroom::Showroom::new(),
-        page: Page::Drive,
+        page: Page::Home,
         page_anim: 1.0,
+        page_run: 1.0,
+        home_asked: false,
         drive: drive::DriveView::default(),
         phone: phone::PhoneView::default(),
         pages: pages::PagesView::default(),
@@ -252,7 +262,7 @@ impl Launcher {
             app.page = *pg;
             // (the phone's tab for it)
             app.phone.tab = match pg {
-                Page::Drive => phone::Tab::Play,
+                Page::Home | Page::Drive => phone::Tab::Play,
                 Page::Multiplayer => phone::Tab::Online,
                 Page::Mods => phone::Tab::Mods,
                 other => {
@@ -1047,22 +1057,23 @@ impl Launcher {
             }
             phone::draw(self);
         } else {
-        let rail_w = RAIL_W;
         self.page_anim = (self.page_anim + self.ui.dt / 0.15).min(1.0);
+        self.page_run = (self.page_run + self.ui.dt / 0.6).min(1.0);
         // (no wider than a page reads well: on a wide screen the rest is margin, the page
         // in the middle - the panels stretched across 2000 px with their text at one end)
-        let (margin, top) = if mobile { (36.0, 14.0) } else { (64.0, 28.0) };
-        let avail = size.x - rail_w - margin;
+        let (margin, top) = if mobile { (36.0, 14.0) } else { (64.0, BAR_H + 22.0) };
+        let avail = size.x - margin;
         let w = avail.min(1760.0);
         let seen = size.y - top - 40.0;
         // (a phone: laid out for a taller screen, scrolled)
         let h = if mobile { seen.max(mobile::PAGE_H) } else { seen };
         self.page_max = (h - seen).max(0.0);
         self.page_scroll = self.page_scroll.clamp(0.0, self.page_max);
-        let content = Rect::new(rail_w + margin * 0.5 + (avail - w) * 0.5, top - self.page_scroll, w, h);
+        let content = Rect::new(margin * 0.5 + (avail - w) * 0.5, top - self.page_scroll, w, h);
         let e = 1.0 - (1.0 - self.page_anim).powi(3);
         let content = Rect::new(content.x + 8.0 * (1.0 - e), content.y, content.w, content.h);
         match self.page {
+            Page::Home => home::draw(self, content),
             Page::Drive => drive::draw(self, content),
             Page::Multiplayer => multiplayer::draw(self, content),
             Page::Profile => pages::profile(self, content),
@@ -1074,8 +1085,8 @@ impl Launcher {
             Page::Timetable => timetable::draw(self, content),
             Page::Setup => pages::setup(self, content),
         }
-        // the rail over the page (a scrolled page passes under it)
-        self.rail();
+        // the bar over the page (a scrolled page passes under it)
+        self.top_bar();
         self.status_bar();
         }
         self.draw_updated_notice();
@@ -1219,9 +1230,10 @@ impl Launcher {
         if self.page != p {
             self.page = p;
             self.page_anim = 0.0;
+            self.page_run = 0.0;
             self.page_scroll = 0.0;
             self.phone.page = match p {
-                Page::Drive => { self.phone.tab = phone::Tab::Play; None }
+                Page::Home | Page::Drive => { self.phone.tab = phone::Tab::Play; None }
                 Page::Multiplayer => { self.phone.tab = phone::Tab::Online; None }
                 Page::Mods => { self.phone.tab = phone::Tab::Mods; None }
                 other => { self.phone.tab = phone::Tab::More; Some(other) }
@@ -1235,68 +1247,127 @@ impl Launcher {
         }
     }
 
-    fn rail(&mut self) {
+    /// The bar along the top: the way home, the pages, the driver.
+    fn top_bar(&mut self) {
         let size = self.ui.size;
-        let rail = Rect::new(0.0, 0.0, RAIL_W, size.y);
-        self.ui.solid(rail);
-        self.ui.p().rect(rail, RAIL());
-        self.ui.p().rect(Rect::new(RAIL_W - 1.0, 0.0, 1.0, size.y), EDGE());
-        self.ui.text("openOMSI", Vec2::new(24.0, 46.0), 20.0, Weight::Bold, TEXT(), Align::Left);
-        self.ui.text(crate::startup::VERSION, Vec2::new(24.0, 64.0), 12.0, Weight::Regular, TEXT_DIM(), Align::Left);
-        let mut y = 96.0;
+        let bar = Rect::new(0.0, 0.0, size.x, BAR_H);
+        self.ui.solid(bar);
+        self.ui.p().rect(bar, RAIL());
+        self.ui.p().rect(Rect::new(0.0, BAR_H - 1.0, size.x, 1.0), EDGE());
+        let mid = BAR_H * 0.5;
+
+        // the mark and the name: home
+        let home = Rect::new(10.0, 8.0, 150.0, BAR_H - 16.0);
+        let (h, _, clicked) = self.ui.interact(ui::id_of("bar-home"), home);
+        if clicked {
+            self.go(Page::Home);
+        }
+        let mark = Vec2::new(32.0, mid);
+        self.ui.p().circle(mark, 15.0, ACCENT());
+        self.ui.p().circle(mark, 12.5, RAIL());
+        self.ui.icon("directions_bus", mark, 15.0, if h { TEXT() } else { TEXT_SOFT() });
+        let w = self.ui.text("open", Vec2::new(56.0, mid + 6.0), 17.0, Weight::Regular, TEXT(), Align::Left);
+        let w2 = self.ui.text("OMSI", Vec2::new(56.0 + w, mid + 6.0), 17.0, Weight::Black, ACCENT_2(), Align::Left);
+        self.ui.text(crate::startup::VERSION, Vec2::new(56.0 + w + w2 + 8.0, mid + 6.0), 11.0, Weight::Regular, TEXT_FAINT(), Align::Left);
+
         let running = self.state.instances.iter().filter(|i| i.running).count();
         let jobs = self.state.jobs.iter().filter(|j| j.finished.is_none()).count();
-        // the pages are the stops of a line: the one shown is where the bus stands
-        let stop_x = 32.0;
-        let last = y + 42.0 * (PAGES.len() - 1) as f32;
-        self.ui.p().rect(Rect::new(stop_x - 1.0, y + 19.0, 2.0, last - y), TRACK());
-        for (p, name, icon) in PAGES {
-            let r = Rect::new(12.0, y, RAIL_W - 24.0, 38.0);
+        // the driver, at the right end
+        let (level, name) = match &self.state.profile {
+            Some(p) => (p.level, p.name.clone()),
+            None => (1, self.state.config.profile.clone()),
+        };
+        let name = if name.is_empty() { omsi_ui::tr("No driver").to_string() } else { name };
+        let chip_w = (self.ui.width(&name, 13.0, Weight::Medium) + 58.0).clamp(110.0, 210.0);
+        let chip = Rect::new(size.x - chip_w - 14.0, 9.0, chip_w, BAR_H - 18.0);
+        let id = ui::id_of("rail-profile");
+        let (h, _, clicked) = self.ui.interact(id, chip);
+        if clicked {
+            self.go(Page::Profile);
+        }
+        let sel = self.page == Page::Profile;
+        self.ui.p().rounded(chip, chip.h * 0.5, if sel { SELECTED() } else if h { HOVER() } else { FIELD() });
+        self.ui.p().rounded_border(chip, chip.h * 0.5, 1.0, EDGE());
+        self.ui.icon("account_circle", Vec2::new(chip.x + 20.0, chip.center().y), 24.0, if sel { ACCENT_2() } else { TEXT_DIM() });
+        self.ui.text_in(&name, Rect::new(chip.x + 38.0, chip.y + 3.0, chip.w - 48.0, 17.0), 13.0, Weight::Medium, TEXT(), Align::Left);
+        self.ui.text_in(&format!("{} {level}", omsi_ui::tr("Level")), Rect::new(chip.x + 38.0, chip.y + 19.0, chip.w - 48.0, 14.0), 10.5, Weight::Regular, TEXT_DIM(), Align::Left);
+
+        // the pages one goes to less often: an icon each, from the driver leftwards
+        const SMALL: [Page; 5] = [Page::Setup, Page::Settings, Page::Controls, Page::Tutorials, Page::Sessions];
+        let mut x = chip.x - 14.0;
+        for p in SMALL {
+            let (_, name, icon) = PAGES.iter().find(|e| e.0 == p).copied().unwrap();
+            let r = Rect::new(x - 38.0, mid - 19.0, 38.0, 38.0);
+            x -= 42.0;
             let id = ui::id_of(&format!("nav-{name}"));
             let (h, _, clicked) = self.ui.interact(id, r);
             if clicked {
                 self.go(p);
             }
             let sel = self.page == p;
+            let over = self.ui.anim(id ^ 6, if h { 1.0 } else { 0.0 }, 0.06);
+            if sel {
+                self.ui.p().rounded(r, 19.0, SELECTED());
+            } else if over > 0.01 {
+                self.ui.p().rounded(r, 19.0, HOVER().alpha(over));
+            }
+            self.ui.icon(icon, r.center(), 19.0, if sel { TEXT() } else if h { TEXT_SOFT() } else { TEXT_DIM() });
+            if p == Page::Sessions && running > 0 {
+                self.ui.p().circle(Vec2::new(r.right() - 8.0, r.y + 9.0), 4.5, RAIL());
+                self.ui.p().circle(Vec2::new(r.right() - 8.0, r.y + 9.0), 3.0, OK());
+            }
+            self.ui.tooltip(r, name);
+        }
+        let right = x;
+
+        // the pages one lives in: icon and name (the names go where the window is narrow)
+        const MAIN: [Page; 5] = [Page::Home, Page::Drive, Page::Multiplayer, Page::Timetable, Page::Mods];
+        let names = size.x >= 1180.0;
+        let mut x = 178.0;
+        for p in MAIN {
+            let (_, name, icon) = PAGES.iter().find(|e| e.0 == p).copied().unwrap();
+            let sel = self.page == p;
+            let shown = names || sel;
+            let tw = if shown { self.ui.width(name, 13.5, Weight::Medium) } else { 0.0 };
+            let count = if p == Page::Mods { jobs } else { 0 };
+            let w = if shown { tw + 50.0 } else { 40.0 } + if count > 0 { 18.0 } else { 0.0 };
+            let r = Rect::new(x, mid - 19.0, w, 38.0);
+            x += w + 4.0;
+            if r.right() > right - 6.0 {
+                continue;
+            }
+            let id = ui::id_of(&format!("nav-{name}"));
+            let (h, _, clicked) = self.ui.interact(id, r);
+            if clicked {
+                self.go(p);
+            }
             let on = self.ui.anim(id ^ 5, if sel { 1.0 } else { 0.0 }, 0.09);
             let over = self.ui.anim(id ^ 6, if h { 1.0 } else { 0.0 }, 0.06);
-            if over > 0.01 && !sel {
-                self.ui.p().rounded(r, 19.0, HOVER().alpha(0.55 * over));
+            if on > 0.01 {
+                self.ui.p().rounded(r, 19.0, SELECTED().alpha(on));
+            } else if over > 0.01 {
+                self.ui.p().rounded(r, 19.0, HOVER().alpha(over));
             }
-            let stop = Vec2::new(stop_x, r.center().y);
-            self.ui.p().circle(stop, 14.0 + on, TRACK().mix(TEXT_DIM(), over).mix(ACCENT(), on));
-            self.ui.p().circle(stop, 12.5 - 12.5 * on, RAIL());
             let c = if sel { TEXT() } else if h { TEXT_SOFT() } else { TEXT_DIM() };
-            self.ui.icon(icon, stop, 16.0, c.mix(ON_ACCENT(), on));
-            self.ui.text_in(name, Rect::new(r.x + 46.0, r.y, r.w - 76.0, r.h), 13.5, if sel { Weight::Bold } else { Weight::Regular }, c, Align::Left);
-            let count = match p {
-                Page::Sessions => running,
-                Page::Mods => jobs,
-                _ => 0,
-            };
-            if count > 0 {
-                self.ui.text_in(&count.to_string(), Rect::new(r.right() - 30.0, r.y, 20.0, r.h), 12.0, Weight::Bold, if p == Page::Sessions { OK() } else { ACCENT() }, Align::Right);
+            self.ui.icon(icon, Vec2::new(r.x + 20.0, mid), 18.0, if sel { ACCENT_2() } else { c });
+            if shown {
+                self.ui.text_in(name, Rect::new(r.x + 36.0, r.y, tw + 4.0, r.h), 13.5, if sel { Weight::Bold } else { Weight::Medium }, c, Align::Left);
+            } else {
+                self.ui.tooltip(r, name);
             }
-            y += 42.0;
+            if count > 0 {
+                self.ui.text_in(&count.to_string(), Rect::new(r.right() - 26.0, r.y, 18.0, r.h), 12.0, Weight::Bold, ACCENT_2(), Align::Center);
+            }
         }
-        // the driver, quietly at the bottom
-        let card = Rect::new(12.0, size.y - 64.0, RAIL_W - 24.0, 48.0);
-        let id = ui::id_of("rail-profile");
-        let (h, _, clicked) = self.ui.interact(id, card);
-        if clicked {
-            self.go(Page::Profile);
+
+        // a page is being gone to: the bus runs along the bar's edge
+        if self.page_run < 1.0 {
+            let e = 1.0 - (1.0 - self.page_run).powi(2);
+            let fade = (1.0 - self.page_run).min(0.5) * 2.0;
+            let head = size.x * e;
+            self.ui.p().gradient_h(Rect::new((head - 360.0).max(0.0), BAR_H - 2.0, head - (head - 360.0).max(0.0), 2.0), ACCENT().alpha(0.0), ACCENT().alpha(fade));
+            self.ui.icon("directions_bus", Vec2::new(head, BAR_H - 11.0), 18.0, ACCENT_2().alpha(fade));
         }
-        self.ui.p().rect(Rect::new(12.0, card.y - 9.0, RAIL_W - 24.0, 1.0), EDGE());
-        if h {
-            self.ui.p().rounded(card, RADIUS, HOVER());
-        }
-        let (level, name) = match &self.state.profile {
-            Some(p) => (p.level, p.name.clone()),
-            None => (1, self.state.config.profile.clone()),
-        };
-        self.ui.icon("account_circle", Vec2::new(card.x + 22.0, card.center().y), 24.0, TEXT_DIM());
-        self.ui.text_in(if name.is_empty() { "No driver" } else { &name }, Rect::new(card.x + 42.0, card.y + 6.0, card.w - 48.0, 18.0), 13.0, Weight::Medium, TEXT(), Align::Left);
-        self.ui.text_in(&format!("Level {level}"), Rect::new(card.x + 42.0, card.y + 24.0, card.w - 48.0, 16.0), 11.5, Weight::Regular, TEXT_DIM(), Align::Left);
     }
 
     fn status_bar(&mut self) {
@@ -1310,7 +1381,7 @@ impl Launcher {
         }
         let size = self.ui.size;
         let first = text.lines().next().unwrap_or("").to_string();
-        let rail_w = if mobile::mobile() { mobile::RAIL_W_MOBILE } else { RAIL_W };
+        let rail_w = if mobile::mobile() { mobile::RAIL_W_MOBILE } else { 0.0 };
         let r = Rect::new(rail_w + 20.0, size.y - 30.0, size.x - rail_w - 40.0, 24.0);
         if mobile::mobile() {
             // (readable over a page scrolled under it)

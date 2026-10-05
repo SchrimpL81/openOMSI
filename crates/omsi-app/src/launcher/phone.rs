@@ -1197,7 +1197,7 @@ fn embedded(l: &mut Launcher, page: Page, body: Rect, back: bool) {
     let content = Rect::new(body.x + 16.0, body.y + top + 10.0 - l.page_scroll, body.w - 32.0, h);
     l.ui.push_clip(Rect::new(body.x, body.y + top, body.w, body.h - top), 0.0);
     match page {
-        Page::Drive => super::drive::draw(l, content),
+        Page::Home | Page::Drive => super::drive::draw(l, content),
         Page::Multiplayer => super::multiplayer::draw(l, content),
         Page::Profile => super::pages::profile(l, content),
         Page::Settings => super::pages::settings(l, content),
