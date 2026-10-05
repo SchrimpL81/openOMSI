@@ -814,6 +814,7 @@ impl Launcher {
         // --- the interface
         self.preview_rect = None;
         self.map_rect = None;
+        theme::set(self.state.settings.get("launcher_theme").and_then(|v| v.as_str()).unwrap_or(""));
         self.ui.begin(size, scale, dt);
         self.draw_ui();
         if mobile::mobile() {
@@ -1104,7 +1105,7 @@ impl Launcher {
         let size = self.ui.size;
         let full = Rect::new(0.0, 0.0, size.x, size.y);
         self.ui.solid(full);
-        self.ui.p().rect(full, SHADE);
+        self.ui.p().rect(full, SHADE());
         let text = "The launcher rests while you drive, so that the game has the graphics card to itself. It is back as soon as the game ends.";
         let w = (size.x - 48.0).min(520.0);
         let th = self.ui.paragraph_height(text, w - 48.0, 13.0, Weight::Regular);
@@ -1112,9 +1113,9 @@ impl Launcher {
         let r = Rect::new((size.x - w) * 0.5, (size.y - h) * 0.5, w, h);
         self.ui.panel(r);
         let inner = Rect::new(r.x + 24.0, r.y + 20.0, r.w - 48.0, r.h - 40.0);
-        self.ui.icon("directions_bus", Vec2::new(inner.x + 14.0, inner.y + 14.0), 26.0, ACCENT);
-        self.ui.text_in("The game is running", Rect::new(inner.x + 38.0, inner.y, inner.w - 38.0, 28.0), 18.0, Weight::Bold, TEXT, Align::Left);
-        self.ui.paragraph(text, Vec2::new(inner.x, inner.y + 40.0), inner.w, 13.0, Weight::Regular, TEXT_DIM);
+        self.ui.icon("directions_bus", Vec2::new(inner.x + 14.0, inner.y + 14.0), 26.0, ACCENT());
+        self.ui.text_in("The game is running", Rect::new(inner.x + 38.0, inner.y, inner.w - 38.0, 28.0), 18.0, Weight::Bold, TEXT(), Align::Left);
+        self.ui.paragraph(text, Vec2::new(inner.x, inner.y + 40.0), inner.w, 13.0, Weight::Regular, TEXT_DIM());
     }
 
     /// The bus preview in `r`: the game's picture of it, or a word while it loads. The mouse
@@ -1122,18 +1123,18 @@ impl Launcher {
     pub fn preview(&mut self, r: Rect) {
         self.preview_rect = Some(r);
         self.ui.solid(r);
-        self.ui.p().rounded(r, RADIUS, FIELD);
+        self.ui.p().rounded(r, RADIUS, FIELD());
         match (self.preview_tex, self.showroom.has_picture()) {
             (Some(tex), true) => self.ui.image(r, tex, RADIUS),
             _ => {
                 let t = if self.showroom.error.is_some() { "No preview" } else { "Loading…" };
-                self.ui.text_in(t, r, 13.0, Weight::Regular, TEXT_FAINT, Align::Center);
+                self.ui.text_in(t, r, 13.0, Weight::Regular, TEXT_FAINT(), Align::Center);
             }
         }
         if self.showroom.busy && self.showroom.has_picture() {
             let c = Vec2::new(r.right() - 16.0, r.y + 16.0);
             let a = self.ui.time * 5.0;
-            self.ui.p().arc(c, 6.0, 8.0, a, a + 4.2, TEXT_SOFT);
+            self.ui.p().arc(c, 6.0, 8.0, a, a + 4.2, TEXT_SOFT());
         }
         if self.ui.hover(r) && self.ui.input.wheel.y.abs() > 0.0 {
             self.showroom.zoom_by((1.0 - self.ui.input.wheel.y * 0.08).clamp(0.8, 1.25));
@@ -1153,16 +1154,16 @@ impl Launcher {
             (Some(tex), true) => self.ui.image(r, tex, RADIUS),
             _ => {
                 self.ui.solid(r);
-                self.ui.p().rounded(r, RADIUS, BACKDROP);
+                self.ui.p().rounded(r, RADIUS, BACKDROP());
                 let t = if status.is_empty() { "Loading…" } else { status };
-                self.ui.text_in(t, Rect::new(r.x, r.y + r.h * 0.5 - 12.0, r.w, 24.0), 13.5, Weight::Regular, TEXT_FAINT, Align::Center);
+                self.ui.text_in(t, Rect::new(r.x, r.y + r.h * 0.5 - 12.0, r.w, 24.0), 13.5, Weight::Regular, TEXT_FAINT(), Align::Center);
             }
         }
         if self.mapview.busy() {
             // (out of the way of the panels: the map is being read, the page is not)
             let c = Vec2::new(r.right() - 26.0, r.y + r.h - 26.0);
             let a = self.ui.time * 5.0;
-            self.ui.p().arc(c, 6.0, 8.0, a, a + 4.2, TEXT_SOFT);
+            self.ui.p().arc(c, 6.0, 8.0, a, a + 4.2, TEXT_SOFT());
         }
     }
 
@@ -1196,9 +1197,9 @@ impl Launcher {
             (Some(tex), true) => self.ui.image(r, tex, RADIUS),
             _ => {
                 self.ui.solid(r);
-                self.ui.p().rounded(r, RADIUS, FIELD);
+                self.ui.p().rounded(r, RADIUS, FIELD());
                 let t = if self.showroom.error.is_some() { "No preview" } else { "Loading…" };
-                self.ui.text_in(t, Rect::new(r.x, r.y + r.h * 0.5 - 12.0, r.w, 24.0), 13.0, Weight::Regular, TEXT_FAINT, Align::Center);
+                self.ui.text_in(t, Rect::new(r.x, r.y + r.h * 0.5 - 12.0, r.w, 24.0), 13.0, Weight::Regular, TEXT_FAINT(), Align::Center);
             }
         }
     }
@@ -1238,17 +1239,17 @@ impl Launcher {
         let size = self.ui.size;
         let rail = Rect::new(0.0, 0.0, RAIL_W, size.y);
         self.ui.solid(rail);
-        self.ui.p().rect(rail, RAIL);
-        self.ui.p().rect(Rect::new(RAIL_W - 1.0, 0.0, 1.0, size.y), EDGE);
-        self.ui.text("openOMSI", Vec2::new(24.0, 46.0), 20.0, Weight::Bold, TEXT, Align::Left);
-        self.ui.text(crate::startup::VERSION, Vec2::new(24.0, 64.0), 12.0, Weight::Regular, TEXT_DIM, Align::Left);
+        self.ui.p().rect(rail, RAIL());
+        self.ui.p().rect(Rect::new(RAIL_W - 1.0, 0.0, 1.0, size.y), EDGE());
+        self.ui.text("openOMSI", Vec2::new(24.0, 46.0), 20.0, Weight::Bold, TEXT(), Align::Left);
+        self.ui.text(crate::startup::VERSION, Vec2::new(24.0, 64.0), 12.0, Weight::Regular, TEXT_DIM(), Align::Left);
         let mut y = 96.0;
         let running = self.state.instances.iter().filter(|i| i.running).count();
         let jobs = self.state.jobs.iter().filter(|j| j.finished.is_none()).count();
         // the pages are the stops of a line: the one shown is where the bus stands
         let stop_x = 32.0;
         let last = y + 42.0 * (PAGES.len() - 1) as f32;
-        self.ui.p().rect(Rect::new(stop_x - 1.0, y + 19.0, 2.0, last - y), TRACK);
+        self.ui.p().rect(Rect::new(stop_x - 1.0, y + 19.0, 2.0, last - y), TRACK());
         for (p, name, icon) in PAGES {
             let r = Rect::new(12.0, y, RAIL_W - 24.0, 38.0);
             let id = ui::id_of(&format!("nav-{name}"));
@@ -1260,13 +1261,13 @@ impl Launcher {
             let on = self.ui.anim(id ^ 5, if sel { 1.0 } else { 0.0 }, 0.09);
             let over = self.ui.anim(id ^ 6, if h { 1.0 } else { 0.0 }, 0.06);
             if over > 0.01 && !sel {
-                self.ui.p().rounded(r, 19.0, HOVER.alpha(0.55 * over));
+                self.ui.p().rounded(r, 19.0, HOVER().alpha(0.55 * over));
             }
             let stop = Vec2::new(stop_x, r.center().y);
-            self.ui.p().circle(stop, 14.0 + on, TRACK.mix(TEXT_DIM, over).mix(ACCENT, on));
-            self.ui.p().circle(stop, 12.5 - 12.5 * on, RAIL);
-            let c = if sel { TEXT } else if h { TEXT_SOFT } else { TEXT_DIM };
-            self.ui.icon(icon, stop, 16.0, c.mix(ON_ACCENT, on));
+            self.ui.p().circle(stop, 14.0 + on, TRACK().mix(TEXT_DIM(), over).mix(ACCENT(), on));
+            self.ui.p().circle(stop, 12.5 - 12.5 * on, RAIL());
+            let c = if sel { TEXT() } else if h { TEXT_SOFT() } else { TEXT_DIM() };
+            self.ui.icon(icon, stop, 16.0, c.mix(ON_ACCENT(), on));
             self.ui.text_in(name, Rect::new(r.x + 46.0, r.y, r.w - 76.0, r.h), 13.5, if sel { Weight::Bold } else { Weight::Regular }, c, Align::Left);
             let count = match p {
                 Page::Sessions => running,
@@ -1274,7 +1275,7 @@ impl Launcher {
                 _ => 0,
             };
             if count > 0 {
-                self.ui.text_in(&count.to_string(), Rect::new(r.right() - 30.0, r.y, 20.0, r.h), 12.0, Weight::Bold, if p == Page::Sessions { OK } else { ACCENT }, Align::Right);
+                self.ui.text_in(&count.to_string(), Rect::new(r.right() - 30.0, r.y, 20.0, r.h), 12.0, Weight::Bold, if p == Page::Sessions { OK() } else { ACCENT() }, Align::Right);
             }
             y += 42.0;
         }
@@ -1285,17 +1286,17 @@ impl Launcher {
         if clicked {
             self.go(Page::Profile);
         }
-        self.ui.p().rect(Rect::new(12.0, card.y - 9.0, RAIL_W - 24.0, 1.0), EDGE);
+        self.ui.p().rect(Rect::new(12.0, card.y - 9.0, RAIL_W - 24.0, 1.0), EDGE());
         if h {
-            self.ui.p().rounded(card, RADIUS, HOVER);
+            self.ui.p().rounded(card, RADIUS, HOVER());
         }
         let (level, name) = match &self.state.profile {
             Some(p) => (p.level, p.name.clone()),
             None => (1, self.state.config.profile.clone()),
         };
-        self.ui.icon("account_circle", Vec2::new(card.x + 22.0, card.center().y), 24.0, TEXT_DIM);
-        self.ui.text_in(if name.is_empty() { "No driver" } else { &name }, Rect::new(card.x + 42.0, card.y + 6.0, card.w - 48.0, 18.0), 13.0, Weight::Medium, TEXT, Align::Left);
-        self.ui.text_in(&format!("Level {level}"), Rect::new(card.x + 42.0, card.y + 24.0, card.w - 48.0, 16.0), 11.5, Weight::Regular, TEXT_DIM, Align::Left);
+        self.ui.icon("account_circle", Vec2::new(card.x + 22.0, card.center().y), 24.0, TEXT_DIM());
+        self.ui.text_in(if name.is_empty() { "No driver" } else { &name }, Rect::new(card.x + 42.0, card.y + 6.0, card.w - 48.0, 18.0), 13.0, Weight::Medium, TEXT(), Align::Left);
+        self.ui.text_in(&format!("Level {level}"), Rect::new(card.x + 42.0, card.y + 24.0, card.w - 48.0, 16.0), 11.5, Weight::Regular, TEXT_DIM(), Align::Left);
     }
 
     fn status_bar(&mut self) {
@@ -1313,21 +1314,21 @@ impl Launcher {
         let r = Rect::new(rail_w + 20.0, size.y - 30.0, size.x - rail_w - 40.0, 24.0);
         if mobile::mobile() {
             // (readable over a page scrolled under it)
-            self.ui.p().rect(Rect::new(rail_w, size.y - 34.0, size.x - rail_w, 34.0), RAIL.alpha(0.92));
+            self.ui.p().rect(Rect::new(rail_w, size.y - 34.0, size.x - rail_w, 34.0), RAIL().alpha(0.92));
         }
-        let c = if err { DANGER } else { TEXT_DIM };
+        let c = if err { DANGER() } else { TEXT_DIM() };
         self.ui.text_in(&first, r, 12.0, Weight::Regular, c.alpha(fade), Align::Left);
         self.ui.tooltip(r, &text);
     }
 
     /// A page's title and what it is for.
     pub fn page_title(&mut self, r: Rect, title: &str, sub: &str) -> Rect {
-        self.ui.text(title, Vec2::new(r.x, r.y + 23.0), 25.0, Weight::Bold, TEXT, Align::Left);
+        self.ui.text(title, Vec2::new(r.x, r.y + 23.0), 25.0, Weight::Bold, TEXT(), Align::Left);
         if !sub.is_empty() {
             // (a narrow window: the line stops short of the tabs some pages put top right,
             // it ran under them on a phone)
             let w = if r.w < 1100.0 { r.w - 340.0 } else { r.w };
-            self.ui.text_in(sub, Rect::new(r.x, r.y + 34.0, w, 20.0), 12.5, Weight::Regular, TEXT_DIM, Align::Left);
+            self.ui.text_in(sub, Rect::new(r.x, r.y + 34.0, w, 20.0), 12.5, Weight::Regular, TEXT_DIM(), Align::Left);
         }
         Rect::new(r.x, r.y + 64.0, r.w, (r.h - 64.0).max(0.0))
     }

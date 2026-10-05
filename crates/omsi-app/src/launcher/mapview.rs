@@ -34,15 +34,7 @@ use std::time::Instant;
 // casing first, then every road's surface over every casing, then the chosen line's route
 // in the map's own red.
 use crate::navigator::ROUTE;
-const ROAD_CASING: Color = Color::rgba(7, 20, 37, 0.9);
-const ROAD: Color = Color::rgba(74, 108, 146, 1.0);
-const ROAD_MAIN: Color = Color::rgba(112, 146, 184, 1.0);
-const STOP: Color = Color::rgba(244, 247, 251, 1.0);
-/// Entry points wear the launcher's own yellow; the one under the mouse a pale ring, the
-/// chosen one a white (a click on the map takes the place of a name in a list of seventy).
-const ENTRY: Color = super::theme::ACCENT;
-const ENTRY_HOVER: Color = Color::rgba(146, 168, 194, 1.0);
-const ENTRY_HERE: Color = Color::rgba(255, 255, 255, 1.0);
+use super::theme::{ACCENT, ROAD, ROAD_CASING, ROAD_MAIN, TEXT, TEXT_DIM};
 /// A road is at least this wide on the screen when the map is far out, its own metres when
 /// it is near (the toolkit takes both: `Painter::ribbon`); the route, the dots and the rings
 /// have no metres of their own. The first two match the game's city map.
@@ -151,6 +143,8 @@ struct Key {
     trip: String,
     /// The simplification the plan was built with, as the bit pattern of its metres.
     tolerance: u32,
+    /// The look its colours are of.
+    theme: usize,
 }
 
 /// The map: what it shows, where it is looking, and the texture it is drawn into.
@@ -580,7 +574,7 @@ impl MapView {
         }
         let roads = self.roads.clone()?;
         let tolerance = self.tolerance();
-        let key = Key { global: self.shown.as_ref().map(|s| s.global.clone()).unwrap_or_default(), trip: self.trip_name(), tolerance: tolerance.to_bits() };
+        let key = Key { global: self.shown.as_ref().map(|s| s.global.clone()).unwrap_or_default(), trip: self.trip_name(), tolerance: tolerance.to_bits(), theme: super::theme::current() };
         if self.plan_is_stale(&key) {
             let (verts, points) = self.build(&roads, tolerance);
             let count = verts.len() as u32;
@@ -678,9 +672,9 @@ impl MapView {
         for pass in 0..2 {
             for r in &roads.roads {
                 if pass == 0 {
-                    band(&mut p, &r.points, r.width + 2.0, CASING_PX * k, ROAD_CASING);
+                    band(&mut p, &r.points, r.width + 2.0, CASING_PX * k, ROAD_CASING());
                 } else {
-                    band(&mut p, &r.points, r.width, ROAD_PX * k, if r.main { ROAD_MAIN } else { ROAD });
+                    band(&mut p, &r.points, r.width, ROAD_PX * k, if r.main { ROAD_MAIN() } else { ROAD() });
                 }
             }
         }
@@ -707,17 +701,17 @@ impl MapView {
         let at = |q: DVec2| Vec3::new((q.x - roads.origin.x) as f32, (q.y - roads.origin.y) as f32, 0.0);
         let mut p = Painter::new();
         for (q, _) in &self.stops {
-            p.world_disc(at(*q), 0.0, STOP_PX * k, STOP);
+            p.world_disc(at(*q), 0.0, STOP_PX * k, TEXT());
         }
         let chosen = self.chosen();
         for (i, e) in roads.entries.iter().enumerate() {
-            p.world_disc(at(e.at), 0.0, ENTRY_PX * k, ENTRY);
+            p.world_disc(at(e.at), 0.0, ENTRY_PX * k, ACCENT());
             if self.hover == Some(i) {
-                ring(&mut p, at(e.at), (ENTRY_PX + 3.0) * k, 2.0 * k, ENTRY_HOVER, mpp);
+                ring(&mut p, at(e.at), (ENTRY_PX + 3.0) * k, 2.0 * k, TEXT_DIM(), mpp);
             }
             // (the choice counts `global.cfg`'s list, which the marker's own place names)
             if chosen == e.index as i32 {
-                ring(&mut p, at(e.at), (ENTRY_PX + 6.5) * k, 2.0 * k, ENTRY_HERE, mpp);
+                ring(&mut p, at(e.at), (ENTRY_PX + 6.5) * k, 2.0 * k, TEXT(), mpp);
             }
         }
         p.verts
@@ -957,7 +951,7 @@ mod tests {
     #[test]
     fn a_zoom_in_progress_keeps_the_plan_it_has() {
         let mut m = map();
-        let built = Key { global: PathBuf::from("maps/Grundorf/global.cfg"), trip: String::new(), tolerance: 2.0f32.to_bits() };
+        let built = Key { global: PathBuf::from("maps/Grundorf/global.cfg"), trip: String::new(), tolerance: 2.0f32.to_bits(), theme: 0 };
         let finer = Key { tolerance: 1.0f32.to_bits(), ..built.clone() };
         let plan = || Some(Plan { key: built.clone(), verts: Vec::new(), count: 0, uploaded: true });
         m.plan = plan();
