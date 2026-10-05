@@ -9,7 +9,10 @@
 //! functions `omsi-launcher --cli` offers a terminal.
 
 pub(crate) mod drive;
+mod gallery;
 mod home;
+mod lines;
+mod livery;
 pub(crate) mod mapview;
 pub mod mobile;
 pub mod phone;
@@ -52,9 +55,12 @@ pub enum Page {
     Tutorials,
     Timetable,
     Setup,
+    Buses,
+    Lines,
+    Livery,
 }
 
-const PAGES: [(Page, &str, &str); 11] = [
+const PAGES: [(Page, &str, &str); 14] = [
     (Page::Home, "Home", "home"),
     (Page::Drive, "Drive", "directions_bus"),
     (Page::Multiplayer, "Multiplayer", "groups"),
@@ -66,6 +72,9 @@ const PAGES: [(Page, &str, &str); 11] = [
     (Page::Tutorials, "Tutorials", "help"),
     (Page::Timetable, "Timetable", "schedule"),
     (Page::Setup, "Setup", "folder_open"),
+    (Page::Buses, "Buses", "photo_library"),
+    (Page::Lines, "Lines", "route"),
+    (Page::Livery, "Livery", "format_paint"),
 ];
 
 #[cfg(not(target_os = "android"))]
@@ -106,12 +115,18 @@ pub struct Launcher {
     ui: Ui,
     state: state::State,
     showroom: showroom::Showroom,
+    /// The gallery's own showroom: it pictures one bus after the other (see `gallery`).
+    thumbs: showroom::Showroom,
     page: Page,
     page_anim: f32,
     /// The bus on the bar's edge after a page was gone to: 0 at the start, 1 arrived.
     page_run: f32,
     /// The Home page asked for the driver's record once.
     home_asked: bool,
+    home: home::HomeView,
+    pub gallery: gallery::GalleryView,
+    pub lines: lines::LinesView,
+    pub livery: livery::LiveryView,
     pub drive: drive::DriveView,
     /// The launcher made for a phone (see `phone`).
     pub phone: phone::PhoneView,
@@ -190,10 +205,15 @@ impl Launcher {
         ui: Ui::new(),
         state: state::State::new(),
         showroom: showroom::Showroom::new(),
+        thumbs: showroom::Showroom::new(),
         page: Page::Home,
         page_anim: 1.0,
         page_run: 1.0,
         home_asked: false,
+        home: Default::default(),
+        gallery: Default::default(),
+        lines: Default::default(),
+        livery: Default::default(),
         drive: drive::DriveView::default(),
         phone: phone::PhoneView::default(),
         pages: pages::PagesView::default(),
@@ -303,6 +323,9 @@ impl Launcher {
         self.gpu = None;
         self.preview_tex = None;
         self.showroom = showroom::Showroom::new();
+        self.thumbs = showroom::Showroom::new();
+        self.gallery.drop_gpu();
+        self.livery.drop_gpu();
         self.preview_gen = 0;
         self.map_tex = None;
         self.map_gen = 0;
@@ -812,13 +835,30 @@ impl Launcher {
         self.update_tick(event_loop);
         // the preview shows the chosen bus in the chosen light
         let c = &self.state.choice;
-        let look = showroom::Look { root: std::path::PathBuf::from(&self.state.config.root), map: c.map.clone(), bus: c.bus.clone(), paint: c.paint.clone(), weather: c.weather.clone(), time: c.time, date: c.date.clone() };
+        let mut look = showroom::Look { root: std::path::PathBuf::from(&self.state.config.root), map: c.map.clone(), bus: c.bus.clone(), paint: c.paint.clone(), weather: c.weather.clone(), time: c.time, date: c.date.clone() };
+        // (the livery studio paints by daylight, whatever hour the duty starts at)
+        if self.page == Page::Livery {
+            look.time = 12 * 60;
+            look.weather = String::new();
+        }
         // (not while a game runs: the launcher looked at meanwhile loads no bus onto the card)
         if !look.bus.is_empty() && !look.map.is_empty() && !self.state.in_game() {
             self.showroom.want(look);
         }
         if let Some(r) = self.renderer.as_ref() {
             self.showroom.update(r, dt);
+        }
+        // the gallery's pictures, one bus after the other while it is open; the livery
+        // studio's bus and its paint
+        if !self.state.in_game() {
+            if let Some(mut r) = self.renderer.take() {
+                if self.page == Page::Buses {
+                    gallery::pump(self, &mut r, dt);
+                }
+                // (also off its page: the bus gets its own paint back)
+                livery::pump(self, &mut r, dt);
+                self.renderer = Some(r);
+            }
         }
 
         // --- the interface
@@ -887,6 +927,13 @@ impl Launcher {
                 let view = tex.create_view(&Default::default());
                 let id = gpu.add_view(&renderer.device, &view, (w, h));
                 self.icons.insert(addr, id);
+            }
+        }
+        // the gallery's pictures read or taken this frame
+        for (key, img) in std::mem::take(&mut self.gallery.pending) {
+            if let Some(gpu) = self.gpu.as_mut() {
+                let id = upload_picture(renderer, gpu, &img, "bus picture");
+                self.gallery.tex.insert(key, id);
             }
         }
         let draws: Vec<Draw> = ranges.iter().enumerate().map(|(k, (r, tex))| Draw { buffer: 0, range: r.clone(), layer: k, texture: *tex }).collect();
@@ -1084,6 +1131,9 @@ impl Launcher {
             Page::Tutorials => pages::tutorials(self, content),
             Page::Timetable => timetable::draw(self, content),
             Page::Setup => pages::setup(self, content),
+            Page::Buses => gallery::draw(self, content),
+            Page::Lines => lines::draw(self, content),
+            Page::Livery => livery::draw(self, content),
         }
         // the bar over the page (a scrolled page passes under it)
         self.top_bar();
@@ -1321,8 +1371,10 @@ impl Launcher {
         let right = x;
 
         // the pages one lives in: icon and name (the names go where the window is narrow)
-        const MAIN: [Page; 5] = [Page::Home, Page::Drive, Page::Multiplayer, Page::Timetable, Page::Mods];
-        let names = size.x >= 1180.0;
+        const MAIN: [Page; 8] = [Page::Home, Page::Drive, Page::Multiplayer, Page::Buses, Page::Lines, Page::Livery, Page::Timetable, Page::Mods];
+        // (the names while all of them fit, else the icons with the chosen page's name)
+        let named: f32 = MAIN.iter().map(|p| PAGES.iter().find(|e| e.0 == *p).map(|e| self.ui.width(e.1, 13.5, Weight::Medium) + 54.0).unwrap_or(0.0)).sum();
+        let names = 178.0 + named + 24.0 < right;
         let mut x = 178.0;
         for p in MAIN {
             let (_, name, icon) = PAGES.iter().find(|e| e.0 == p).copied().unwrap();
@@ -1405,6 +1457,15 @@ impl Launcher {
     }
 }
 
+
+/// A picture onto the GPU as a texture the interface draws (its number there).
+fn upload_picture(renderer: &Renderer, gpu: &mut omsi_ui::Gpu, img: &image::RgbaImage, label: &str) -> usize {
+    let (w, h) = img.dimensions();
+    let tex = renderer.device.create_texture(&wgpu::TextureDescriptor { label: Some(label), size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8UnormSrgb, usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[] });
+    renderer.queue.write_texture(tex.as_image_copy(), img, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) }, wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 });
+    let view = tex.create_view(&Default::default());
+    gpu.add_view(&renderer.device, &view, (w, h))
+}
 
 /// The showroom's renderer: a bus on a floor needs none of the game's costly passes - no
 /// ambient occlusion, a small shadow map, 4x MSAA for the edges whatever the game uses.

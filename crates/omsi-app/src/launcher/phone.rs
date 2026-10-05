@@ -1207,6 +1207,9 @@ fn embedded(l: &mut Launcher, page: Page, body: Rect, back: bool) {
         Page::Tutorials => super::pages::tutorials(l, content),
         Page::Timetable => super::timetable::draw(l, content),
         Page::Setup => super::pages::setup(l, content),
+        Page::Buses => super::gallery::draw(l, content),
+        Page::Lines => super::lines::draw(l, content),
+        Page::Livery => super::livery::draw(l, content),
     }
     l.ui.pop_clip();
     if back {

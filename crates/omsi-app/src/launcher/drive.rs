@@ -84,6 +84,21 @@ fn write_favourites(f: &std::collections::BTreeSet<String>) {
     }
 }
 
+/// The starred buses (by file, lower case, '/'), read once (the gallery shares them).
+pub(super) fn favourites(d: &mut DriveView) -> std::collections::BTreeSet<String> {
+    d.favourites.get_or_insert_with(read_favourites).clone()
+}
+
+/// A bus starred, or its star taken away again.
+pub(super) fn toggle_favourite(d: &mut DriveView, file: &str) {
+    let f = d.favourites.get_or_insert_with(read_favourites);
+    let k = fav_key(file);
+    if !f.remove(&k) {
+        f.insert(k);
+    }
+    write_favourites(f);
+}
+
 /// The three steps, in the order a player decides: what to drive, the day it is driven on,
 /// and where (the `drive:N` of `OMSI_LAUNCHER_PAGE` is the step's index).
 const STEPS: [&str; 3] = ["Bus", "Day & weather", "Map & duty"];
