@@ -80,12 +80,15 @@ fn hours(h: f64) -> String {
 /// The card shown in the middle: kept between frames (the wheel and the arrow keys move it).
 pub struct HomeView {
     pub focus: usize,
+    /// The intro: how far it has run, and whether it is over (see `intro`).
+    intro: f32,
+    intro_done: bool,
 }
 
 impl Default for HomeView {
     /// (the second card in the middle: the first stands beside it, the row reads both ways)
     fn default() -> Self {
-        HomeView { focus: 1 }
+        HomeView { focus: 1, intro: 0.0, intro_done: false }
     }
 }
 
@@ -122,12 +125,20 @@ pub fn draw(l: &mut Launcher, area: Rect) {
     // the line with its three stops, the greeting under it
     let cx = area.x + area.w * 0.5;
     let line_y = band_y - head + 18.0;
-    stop_line(l, Vec2::new(cx, line_y), (area.w * 0.2).clamp(150.0, 260.0));
+    let t = l.page_t;
+    // (a light running along the line through the cards, every few seconds)
+    let sweep = (l.ui.time * 0.22).fract();
+    let sx = -300.0 + (size.x + 600.0) * sweep;
+    l.ui.p().gradient_h(Rect::new(sx - 240.0, mid - 2.0, 240.0, 4.0), ACCENT().alpha(0.0), ACCENT().lighten(0.4));
+    l.ui.p().gradient_h(Rect::new(sx, mid - 2.0, 120.0, 4.0), ACCENT().lighten(0.4), ACCENT().alpha(0.0));
+    stop_line(l, Vec2::new(cx, line_y), (area.w * 0.2).clamp(150.0, 260.0), t);
     let name = l.state.profile.as_ref().map(|p| p.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| l.state.config.profile.clone());
     let hour = omsi_launcher_lib::local_now().map(|t| t.3).unwrap_or(12);
     let hello = if name.is_empty() { omsi_ui::tr(greeting(hour)).to_string() } else { format!("{} {name}", omsi_ui::tr(greeting(hour))) };
-    l.ui.text_in(&hello, Rect::new(area.x, line_y + 22.0, area.w, 40.0), 30.0, Weight::Bold, TEXT(), Align::Center);
-    l.ui.text_in("How do you want to drive today?", Rect::new(area.x, line_y + 62.0, area.w, 22.0), 14.0, Weight::Regular, TEXT_DIM(), Align::Center);
+    let a = appear(t, 0.15, 0.5);
+    l.ui.text_in(&hello, Rect::new(area.x, line_y + 22.0 + 14.0 * (1.0 - a), area.w, 40.0), 30.0, Weight::Bold, TEXT().alpha(a), Align::Center);
+    let a = appear(t, 0.25, 0.5);
+    l.ui.text_in("How do you want to drive today?", Rect::new(area.x, line_y + 62.0 + 10.0 * (1.0 - a), area.w, 22.0), 14.0, Weight::Regular, TEXT_DIM().alpha(a), Align::Center);
 
     // the row of cards: the focused one in the middle, the wheel and the arrow keys move it
     let row = Rect::new(0.0, band_y - 10.0, size.x, card_h + 20.0);
@@ -160,9 +171,13 @@ pub fn draw(l: &mut Launcher, area: Rect) {
         // how far from the middle: the far ones fade into the backdrop
         let off = ((r.center().x - cx) / (card_w + gap)).abs();
         let fade = (1.0 - (off - 1.2).max(0.0) * 0.55).clamp(0.0, 1.0);
+        // (the cards come in one after the other, from the middle out)
+        let a = appear(t, 0.3 + off.min(4.0) * 0.08, 0.55);
+        let fade = fade * a;
         if fade <= 0.02 {
             continue;
         }
+        let r = Rect::new(r.x, r.y + 36.0 * (1.0 - a), r.w, r.h);
         if card(l, r, k, c, k == l.home.focus, fade) {
             if k == l.home.focus {
                 open(l, c.mode);
@@ -188,7 +203,8 @@ pub fn draw(l: &mut Launcher, area: Rect) {
 
     // the chips: the driver first, then the other pages
     let chips_y = dots_y + 24.0;
-    chips(l, Rect::new(area.x, chips_y, area.w, 44.0));
+    chips(l, Rect::new(area.x, chips_y, area.w, 44.0), t);
+    signature(l, area, t);
 }
 
 /// The way a card goes.
@@ -211,21 +227,141 @@ fn open(l: &mut Launcher, mode: Mode) {
     }
 }
 
-/// A line along the top with three stops on it, the middle one the brightest.
-fn stop_line(l: &mut Launcher, c: Vec2, half: f32) {
+/// A line along the top with three stops on it: it grows out of the middle when the page
+/// opens, the stops pop up on it, and a little bus runs along it from stop to stop.
+fn stop_line(l: &mut Launcher, c: Vec2, half: f32, since: f32) {
     let y = c.y;
-    l.ui.p().gradient_h(Rect::new(c.x - half - 40.0, y - 2.5, 40.0, 5.0), ACCENT().alpha(0.0), ACCENT());
-    l.ui.p().rect(Rect::new(c.x - half, y - 2.5, half * 2.0, 5.0), ACCENT());
-    l.ui.p().gradient_h(Rect::new(c.x + half, y - 2.5, 40.0, 5.0), ACCENT(), ACCENT().alpha(0.0));
+    let grow = appear(since, 0.0, 0.6);
+    let hw = (half + 40.0) * grow;
+    l.ui.p().gradient_h(Rect::new(c.x - hw, y - 2.5, (hw - half * grow).max(0.0), 5.0), ACCENT().alpha(0.0), ACCENT());
+    l.ui.p().rect(Rect::new(c.x - half * grow, y - 2.5, half * 2.0 * grow, 5.0), ACCENT());
+    l.ui.p().gradient_h(Rect::new(c.x + half * grow, y - 2.5, (hw - half * grow).max(0.0), 5.0), ACCENT(), ACCENT().alpha(0.0));
     let t = l.ui.time;
     for (k, col) in [DANGER(), ACCENT_2(), OK()].into_iter().enumerate() {
+        // (popping up a little over their size, then settling)
+        let x = ((since - 0.25 - k as f32 * 0.12) / 0.35).clamp(0.0, 1.0);
+        if x <= 0.0 {
+            continue;
+        }
+        let pop = 1.0 + (x * std::f32::consts::PI).sin() * 0.25 * (1.0 - x * 0.5);
         let p = Vec2::new(c.x + (k as f32 - 1.0) * half, y);
         let pulse = 0.5 + 0.5 * (t * 1.6 - k as f32 * 0.9).sin();
-        l.ui.p().circle(p, 15.0 + 3.0 * pulse, col.alpha(0.14));
-        l.ui.p().circle(p, 12.0, RAIL());
-        l.ui.p().circle(p, 10.0, col);
-        l.ui.p().circle(p, 5.0, RAIL());
+        l.ui.p().circle(p, (15.0 + 3.0 * pulse) * pop, col.alpha(0.14 * x));
+        l.ui.p().circle(p, 12.0 * pop * x.min(1.0), RAIL());
+        l.ui.p().circle(p, 10.0 * pop * x, col);
+        l.ui.p().circle(p, 5.0 * pop * x, RAIL());
     }
+    // the bus: from one stop to the next, a moment's halt at each, there and back
+    if since > 1.0 {
+        let cycle = 7.0;
+        let ph = (t % cycle) / cycle;
+        // 0..0.5 out, 0.5..1 back; within each half: two legs, each with a halt
+        let (half_ph, back) = if ph < 0.5 { (ph * 2.0, false) } else { ((ph - 0.5) * 2.0, true) };
+        let leg = (half_ph * 2.0).min(1.999);
+        let in_leg = leg.fract();
+        let moving = ((in_leg - 0.25) / 0.75).clamp(0.0, 1.0);
+        let e = moving * moving * (3.0 - 2.0 * moving);
+        let u = (leg.floor() + e) / 2.0;
+        let u = if back { 1.0 - u } else { u };
+        let p = Vec2::new(c.x - half + u * half * 2.0, y - 14.0);
+        let a = appear(since, 1.0, 0.4);
+        l.ui.icon("directions_bus", p, 18.0, TEXT().alpha(a));
+        if moving > 0.0 && moving < 1.0 {
+            let dir = if back { 1.0 } else { -1.0 };
+            for k in 0..3 {
+                let sx = p.x + dir * (12.0 + k as f32 * 7.0);
+                l.ui.p().line(Vec2::new(sx, p.y - 4.0 + k as f32 * 4.0), Vec2::new(sx + dir * 8.0, p.y - 4.0 + k as f32 * 4.0), 1.5, TEXT_DIM().alpha(0.6 * a));
+            }
+        }
+    }
+}
+
+/// The designer's mark, bottom right: a small badge and the name.
+fn signature(l: &mut Launcher, area: Rect, since: f32) {
+    let a = appear(since, 0.9, 0.6);
+    if a <= 0.01 {
+        return;
+    }
+    let by = omsi_ui::tr("Design by").to_string();
+    let w1 = l.ui.width(&by, 11.0, Weight::Regular);
+    let w2 = l.ui.width(DESIGNER, 12.5, Weight::Bold);
+    let w = 34.0 + w1 + 6.0 + w2 + 14.0;
+    let r = Rect::new(area.right() - w, area.bottom() - 34.0 + 8.0 * (1.0 - a), w, 30.0);
+    let (h, _, _) = l.ui.interact(id_of("home-signature"), r);
+    let t = l.ui.anim(id_of("home-signature"), if h { 1.0 } else { 0.0 }, 0.1);
+    l.ui.p().rounded(r, 15.0, PANEL().alpha((0.6 + 0.3 * t) * a));
+    l.ui.p().rounded_border(r, 15.0, 1.0, EDGE().mix(ACCENT(), t).alpha(a));
+    mark(l, Vec2::new(r.x + 16.0, r.center().y), 10.0, a, l.ui.time * (0.6 + 2.0 * t));
+    l.ui.text_in(&by, Rect::new(r.x + 32.0, r.y, w1 + 4.0, r.h), 11.0, Weight::Regular, TEXT_DIM().alpha(a), Align::Left);
+    l.ui.text_in(DESIGNER, Rect::new(r.x + 32.0 + w1 + 6.0, r.y, w2 + 4.0, r.h), 12.5, Weight::Bold, TEXT().mix(ACCENT_2(), t).alpha(a), Align::Left);
+    l.ui.tooltip(r, &format!("{} {DESIGNER}: {}", omsi_ui::tr("Design by"), omsi_ui::tr("the looks, the Home page, the bus gallery, the livery studio and the line editor")));
+}
+
+/// The designer's badge: a ring in the look's two colours turning round an "S".
+pub fn mark(l: &mut Launcher, c: Vec2, r: f32, a: f32, turn: f32) {
+    l.ui.p().circle(c, r, RAIL().alpha(a));
+    l.ui.p().arc(c, r - 2.5, r, turn, turn + std::f32::consts::PI, ACCENT().alpha(a));
+    l.ui.p().arc(c, r - 2.5, r, turn + std::f32::consts::PI, turn + std::f32::consts::TAU, ACCENT_2().alpha(a));
+    l.ui.text_in("S", Rect::new(c.x - r, c.y - r, r * 2.0, r * 2.0), r * 1.15, Weight::Black, TEXT().alpha(a), Align::Center);
+}
+
+/// How long the intro runs (seconds).
+const INTRO: f32 = 2.6;
+
+/// The launcher's first moments: a bus drives through the dark along the line, the name
+/// and the designer's mark come up, and the whole of it fades into the Home page. A click
+/// or a key ends it at once; it runs once, when the launcher opens on Home.
+pub fn intro(l: &mut Launcher) {
+    if l.home.intro_done {
+        return;
+    }
+    if l.page != Page::Home || l.ui.input.pressed || !l.ui.input.keys.is_empty() {
+        l.home.intro_done = true;
+        l.ui.input.pressed = false;
+        l.ui.input.keys.clear();
+        return;
+    }
+    l.home.intro += l.ui.dt;
+    let t = l.home.intro;
+    if t >= INTRO {
+        l.home.intro_done = true;
+        // (the Home page comes in from here, not from behind the intro)
+        l.page_t = 0.0;
+        return;
+    }
+    let size = l.ui.size;
+    let full = Rect::new(0.0, 0.0, size.x, size.y);
+    let out = 1.0 - ((t - (INTRO - 0.5)) / 0.5).clamp(0.0, 1.0);
+    l.ui.solid(full);
+    l.ui.p().rect(full, BACKDROP().alpha(out));
+    let mid = size.y * 0.55;
+    // the road: a line drawn across, the bus on it with its light streaks
+    let line = appear(t, 0.0, 0.5);
+    l.ui.p().gradient_h(Rect::new(0.0, mid, size.x * line, 2.0), ACCENT().alpha(0.0), ACCENT().alpha(0.9 * out));
+    l.ui.p().gradient(Rect::new(0.0, mid - 60.0, size.x, 60.0), BACKDROP().alpha(0.0), ACCENT().alpha(0.06 * out));
+    let drive = ((t - 0.2) / 1.6).clamp(0.0, 1.0);
+    let e = 1.0 - (1.0 - drive).powi(2);
+    let len = (size.x * 0.13).clamp(110.0, 190.0);
+    let x = -len + (size.x * 0.5 + len * 0.5) * e;
+    for k in 0..5 {
+        let y = mid - 8.0 - k as f32 * 9.0;
+        let w = 80.0 + 70.0 * ((k * 37 % 5) as f32 / 4.0);
+        l.ui.p().gradient_h(Rect::new(x - w - 10.0 - k as f32 * 14.0, y, w, 2.0), TEXT().alpha(0.0), TEXT().alpha(0.35 * out * (1.0 - e * 0.7)));
+    }
+    bus(l, Vec2::new(x, mid), len, TEXT().alpha(out), PANEL().mix(ACCENT(), 0.35).alpha(out));
+    // the name, and the designer's mark under it
+    let a = appear(t, 1.0, 0.5) * out;
+    let cy = mid - len * 0.28 - 70.0;
+    let w1 = l.ui.width("open", 40.0, Weight::Regular);
+    let w2 = l.ui.width("OMSI", 40.0, Weight::Black);
+    let x0 = size.x * 0.5 - (w1 + w2) * 0.5;
+    l.ui.text("open", Vec2::new(x0, cy + 12.0 * (1.0 - a)), 40.0, Weight::Regular, TEXT().alpha(a), Align::Left);
+    l.ui.text("OMSI", Vec2::new(x0 + w1, cy + 12.0 * (1.0 - a)), 40.0, Weight::Black, ACCENT_2().alpha(a), Align::Left);
+    let b = appear(t, 1.35, 0.5) * out;
+    let by = format!("{} {DESIGNER}", omsi_ui::tr("Design by"));
+    let bw = l.ui.width(&by, 13.0, Weight::Medium) + 30.0;
+    mark(l, Vec2::new(size.x * 0.5 - bw * 0.5 + 9.0, cy + 34.0), 9.0, b, t * 2.0);
+    l.ui.text_in(&by, Rect::new(size.x * 0.5 - bw * 0.5 + 24.0, cy + 24.0, bw, 20.0), 13.0, Weight::Medium, TEXT_DIM().alpha(b), Align::Left);
 }
 
 /// One card: its picture, the icon and the name over it, a line about it. True when clicked.
@@ -430,7 +566,7 @@ fn art(l: &mut Launcher, r: Rect, art: Art, fade: f32, hover: f32) {
 }
 
 /// The chips under the cards: the driver (level and hours with them), then the other pages.
-fn chips(l: &mut Launcher, r: Rect) {
+fn chips(l: &mut Launcher, r: Rect, since: f32) {
     let p = l.state.profile.clone().filter(|p| p.exists);
     let driver = match &p {
         Some(p) => format!("{}: {}  ·  {} {}  ·  {}", omsi_ui::tr("Driver"), p.name, omsi_ui::tr("Level"), p.level, hours(p.hours)),
@@ -449,16 +585,22 @@ fn chips(l: &mut Launcher, r: Rect) {
         if x + w > r.right() && k > 0 {
             break;
         }
-        let c = Rect::new(x, r.y, w, r.h);
+        // (one after the other, rising into place)
+        let a = appear(since, 0.6 + k as f32 * 0.06, 0.45);
+        let c = Rect::new(x, r.y + 16.0 * (1.0 - a), w, r.h);
         x += w + gap;
+        if a <= 0.01 {
+            continue;
+        }
         let id = id_of(&format!("home-chip-{k}"));
         let (h, _, clicked) = l.ui.interact(id, c);
         let t = l.ui.anim(id, if h { 1.0 } else { 0.0 }, 0.07);
+        let c = Rect::new(c.x, c.y - 2.0 * t, c.w, c.h);
         l.ui.solid(c);
-        l.ui.p().rounded(c, RADIUS, PANEL().mix(HOVER(), t));
-        l.ui.p().rounded_border(c, RADIUS, 1.0, EDGE().mix(ACCENT(), t * 0.8));
-        l.ui.icon(icon, Vec2::new(c.x + 22.0, c.center().y), 18.0, if k == 0 { ACCENT_2() } else { TEXT_SOFT().mix(TEXT(), t) });
-        l.ui.text_in(text, Rect::new(c.x + 40.0, c.y, c.w - 48.0, c.h), 13.0, Weight::Medium, TEXT(), Align::Left);
+        l.ui.p().rounded(c, RADIUS, PANEL().mix(HOVER(), t).alpha(a));
+        l.ui.p().rounded_border(c, RADIUS, 1.0, EDGE().mix(ACCENT(), t * 0.8).alpha(a));
+        l.ui.icon(icon, Vec2::new(c.x + 22.0, c.center().y), 18.0, if k == 0 { ACCENT_2().alpha(a) } else { TEXT_SOFT().mix(TEXT(), t).alpha(a) });
+        l.ui.text_in(text, Rect::new(c.x + 40.0, c.y, c.w - 48.0, c.h), 13.0, Weight::Medium, TEXT().alpha(a), Align::Left);
         if clicked {
             l.go(*page);
         }

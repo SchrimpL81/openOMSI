@@ -29,6 +29,8 @@ pub struct GalleryView {
     /// uploaded.
     pub tex: HashMap<String, usize>,
     pub pending: Vec<(String, image::RgbaImage)>,
+    /// When each picture came (the interface's clock): it fades in over the card.
+    pub arrived: HashMap<String, f32>,
     /// The buses asked for this frame (in view, no picture yet), in the order they stand.
     wanted: Vec<(String, VehicleInfo)>,
     /// The bus being pictured now: its key, the look, and how long it has been waited for.
@@ -170,6 +172,8 @@ pub fn draw(l: &mut Launcher, area: Rect) {
     let mut star: Option<String> = None;
     let mut wanted: Vec<(String, VehicleInfo)> = Vec::new();
     let time = l.ui.time;
+    let since = l.page_t;
+    let arrived = l.gallery.arrived.clone();
     l.ui.scroll_area("gallery-grid", grid, &mut |ui, view| {
         if buses.is_empty() {
             ui.text_in(if loading { "Reading the buses…" } else { "No buses found. Try another search." }, Rect::new(view.x, view.y + 20.0, view.w, 30.0), 13.0, Weight::Regular, TEXT_DIM(), Align::Center);
@@ -182,6 +186,9 @@ pub fn draw(l: &mut Launcher, area: Rect) {
                 continue;
             }
             let key = key_of(&root, v);
+            // (the cards come in one after the other, rising)
+            let a = appear(since, 0.05 + (k as f32 * 0.035).min(0.6), 0.45);
+            let r = Rect::new(r.x, r.y + 24.0 * (1.0 - a), r.w, r.h);
             let id = id_of(&format!("gallery-card-{}", v.file));
             let (h, held, clicked) = ui.interact(id, r);
             if clicked {
@@ -196,7 +203,13 @@ pub fn draw(l: &mut Launcher, area: Rect) {
             ui.p().rounded(r, RADIUS, if sel { SELECTED() } else { PANEL().mix(HOVER(), t * 0.6) });
             let pic = Rect::new(r.x + 6.0, r.y + 6.0, r.w - 12.0, r.h - 64.0);
             match tex.get(&key) {
-                Some(&t) => ui.image(pic, t, RADIUS - 3.0),
+                Some(&t) => {
+                    ui.image(pic, t, RADIUS - 3.0);
+                    let b = appear(time - arrived.get(&key).copied().unwrap_or(-10.0), 0.0, 0.5);
+                    if b < 1.0 {
+                        ui.p().rounded(pic, RADIUS - 3.0, FIELD().alpha(1.0 - b));
+                    }
+                }
                 None => {
                     ui.p().rounded(pic, RADIUS - 3.0, FIELD());
                     // (a bus waiting for its picture: an outline of one, and the spinner on the
@@ -231,6 +244,9 @@ pub fn draw(l: &mut Launcher, area: Rect) {
                 ui.badge(Vec2::new(pic.x + 8.0, pic.bottom() - 26.0), "PARTS MISSING", WARN());
             }
             ui.p().rounded_border(r, RADIUS, if sel { 2.0 } else { 1.0 }, if sel { ACCENT() } else { EDGE().mix(ACCENT(), t * 0.7) });
+            if a < 1.0 {
+                ui.p().rounded(r.inset(-1.0), RADIUS, BACKDROP().alpha(1.0 - a));
+            }
         }
         let rows = buses.len().div_ceil(cols);
         rows as f32 * (ch + gap) + 8.0

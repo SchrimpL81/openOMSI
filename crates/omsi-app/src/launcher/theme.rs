@@ -165,6 +165,17 @@ colors! {
     ROAD => road, ROAD_MAIN => road_main, ROAD_CASING => road_casing,
 }
 
+/// Who these looks, the Home page and the workshop's pages were designed by (the mark on
+/// the Home page and in the intro).
+pub const DESIGNER: &str = "SchrimpLeiche81";
+
+/// How far something has come in (0 → 1, eased out) `t` seconds after its page opened, when
+/// it starts `delay` seconds in and takes `dur`.
+pub fn appear(t: f32, delay: f32, dur: f32) -> f32 {
+    let x = ((t - delay) / dur.max(1e-3)).clamp(0.0, 1.0);
+    1.0 - (1.0 - x).powi(3)
+}
+
 pub const RADIUS: f32 = 10.0;
 pub const CTRL: f32 = 6.0;
 /// Height of a control row.
@@ -181,6 +192,13 @@ pub fn backdrop() -> wgpu::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn things_come_in_eased_and_stay() {
+        assert_eq!(appear(0.0, 0.2, 0.5), 0.0);
+        assert!(appear(0.45, 0.2, 0.5) > 0.5);
+        assert_eq!(appear(3.0, 0.2, 0.5), 1.0);
+    }
 
     #[test]
     fn a_look_nobody_knows_is_the_first() {

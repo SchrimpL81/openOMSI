@@ -832,9 +832,12 @@ pub fn draw(l: &mut Launcher, area: Rect) {
         l.ui.text_in(&ba, Rect::new(r.x + 24.0, r.y, r.w - 26.0, r.h), 12.0, Weight::Medium, TEXT_SOFT(), Align::Center);
     }
 
-    toolbar(l, bar);
-    layers_panel(l, left);
-    right_panel(l, right);
+    // (the panels slide in from their sides when the page opens)
+    let a = appear(l.page_t, 0.0, 0.45);
+    let b = appear(l.page_t, 0.08, 0.45);
+    toolbar(l, Rect::new(bar.x, bar.y - 18.0 * (1.0 - a), bar.w, bar.h));
+    layers_panel(l, Rect::new(left.x - 40.0 * (1.0 - b), left.y, left.w, left.h));
+    right_panel(l, Rect::new(right.x + 40.0 * (1.0 - b), right.y, right.w, right.h));
 
     if l.state.bus().is_some() {
         l.showroom_pointer(view);

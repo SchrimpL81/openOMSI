@@ -121,6 +121,8 @@ pub struct Launcher {
     page_anim: f32,
     /// The bus on the bar's edge after a page was gone to: 0 at the start, 1 arrived.
     page_run: f32,
+    /// Seconds since the page was gone to (what comes in one after the other counts on it).
+    pub page_t: f32,
     /// The Home page asked for the driver's record once.
     home_asked: bool,
     home: home::HomeView,
@@ -209,6 +211,7 @@ impl Launcher {
         page: Page::Home,
         page_anim: 1.0,
         page_run: 1.0,
+        page_t: 0.0,
         home_asked: false,
         home: Default::default(),
         gallery: Default::default(),
@@ -949,6 +952,7 @@ impl Launcher {
         for (key, img) in std::mem::take(&mut self.gallery.pending) {
             if let Some(gpu) = self.gpu.as_mut() {
                 let id = upload_picture(renderer, gpu, &img, "bus picture");
+                self.gallery.arrived.insert(key.clone(), self.ui.time);
                 self.gallery.tex.insert(key, id);
             }
         }
@@ -1122,6 +1126,7 @@ impl Launcher {
         } else {
         self.page_anim = (self.page_anim + self.ui.dt / 0.15).min(1.0);
         self.page_run = (self.page_run + self.ui.dt / 0.6).min(1.0);
+        self.page_t += self.ui.dt;
         // (no wider than a page reads well: on a wide screen the rest is margin, the page
         // in the middle - the panels stretched across 2000 px with their text at one end)
         let (margin, top) = if mobile { (36.0, 14.0) } else { (64.0, BAR_H + 22.0) };
@@ -1154,6 +1159,8 @@ impl Launcher {
         // the bar over the page (a scrolled page passes under it)
         self.top_bar();
         self.status_bar();
+        // the launcher's first moments (once, over everything)
+        home::intro(self);
         }
         self.draw_updated_notice();
         if let Some(i) = saved {
@@ -1297,6 +1304,7 @@ impl Launcher {
             self.page = p;
             self.page_anim = 0.0;
             self.page_run = 0.0;
+            self.page_t = 0.0;
             self.page_scroll = 0.0;
             self.phone.page = match p {
                 Page::Home | Page::Drive => { self.phone.tab = phone::Tab::Play; None }

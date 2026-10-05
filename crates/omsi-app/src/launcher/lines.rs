@@ -127,6 +127,9 @@ pub struct LinesView {
     /// The way between each two stops, by direction (found when the stops change).
     ways: [Vec<Option<Vec<DVec2>>>; 2],
     ways_for: [Vec<Stop>; 2],
+    /// When each leg was found (the interface's clock): a new leg is drawn growing from its
+    /// first stop to its second.
+    born: [Vec<f32>; 2],
     /// The map's picture this frame and its texture in the interface.
     pub rect: Option<Rect>,
     pub tex: Option<usize>,
@@ -195,8 +198,10 @@ pub fn draw(l: &mut Launcher, area: Rect) {
     map_background(l, map_r);
     ways(l);
     let hovered = overlay(l, map_r);
-    left_panel(l, left, mi);
-    right_panel(l, right);
+    // (the panels slide in from their sides when the page opens)
+    let a = appear(l.page_t, 0.05, 0.45);
+    left_panel(l, Rect::new(left.x - 40.0 * (1.0 - a), left.y, left.w, left.h), mi);
+    right_panel(l, Rect::new(right.x + 40.0 * (1.0 - a), right.y, right.w, right.h));
     // a click on the map: the stop under it joins the line (at its end)
     let p = mapview::Pointer {
         at: l.ui.input.mouse,
@@ -251,6 +256,7 @@ fn map_background(l: &mut Launcher, r: Rect) {
 
 /// The ways between the stops, found again for a direction whose stops changed.
 fn ways(l: &mut Launcher) {
+    let now = l.ui.time;
     let v = &mut l.lines;
     let Some(line) = v.lines.get(v.selected) else { return };
     for dir in 0..2 {
@@ -260,20 +266,56 @@ fn ways(l: &mut Launcher) {
         }
         // (only the legs that changed are looked for again)
         let old = std::mem::take(&mut v.ways[dir]);
+        let old_born = std::mem::take(&mut v.born[dir]);
         let old_stops = std::mem::replace(&mut v.ways_for[dir], stops.clone());
-        v.ways[dir] = stops
+        let legs: Vec<(Option<Vec<DVec2>>, f32)> = stops
             .windows(2)
             .enumerate()
             .map(|(k, w)| {
                 if old_stops.get(k) == Some(&w[0]) && old_stops.get(k + 1) == Some(&w[1]) {
                     if let Some(Some(r)) = old.get(k) {
-                        return Some(r.clone());
+                        return (Some(r.clone()), old_born.get(k).copied().unwrap_or(now));
                     }
                 }
-                v.map.route(w[0].at(), w[1].at())
+                (v.map.route(w[0].at(), w[1].at()), now)
             })
             .collect();
+        v.born[dir] = legs.iter().map(|l| l.1).collect();
+        v.ways[dir] = legs.into_iter().map(|l| l.0).collect();
     }
+}
+
+/// The first `share` (0..1) of a polyline's length.
+fn cut(pts: &[Vec2], share: f32) -> Vec<Vec2> {
+    if share >= 1.0 {
+        return pts.to_vec();
+    }
+    let total: f32 = pts.windows(2).map(|s| (s[1] - s[0]).length()).sum();
+    let mut left = total * share.max(0.0);
+    let mut out = Vec::new();
+    for s in pts.windows(2) {
+        out.push(s[0]);
+        let d = (s[1] - s[0]).length();
+        if d >= left {
+            out.push(s[0] + (s[1] - s[0]) * (left / d.max(1e-6)));
+            return out;
+        }
+        left -= d;
+    }
+    out
+}
+
+/// The point `d` along a polyline.
+fn at_length(pts: &[Vec2], d: f32) -> Option<Vec2> {
+    let mut left = d;
+    for s in pts.windows(2) {
+        let len = (s[1] - s[0]).length();
+        if len >= left {
+            return Some(s[0] + (s[1] - s[0]) * (left / len.max(1e-6)));
+        }
+        left -= len;
+    }
+    pts.last().copied()
 }
 
 /// Over the map: every stop of it as a dot, the line's way and its stops numbered. Returns
@@ -288,12 +330,20 @@ fn overlay(l: &mut Launcher, r: Rect) -> Option<usize> {
     let dir = v.dir;
     let proj = |p: DVec2| l.lines.map.project(p);
     let pts_of = |w: &[DVec2]| -> Vec<Vec2> { w.iter().map(|p| proj(*p)).collect() };
+    let now = l.ui.time;
+    let born = v.born[v.dir].clone();
     let mut lines_px: Vec<(Vec<Vec2>, bool)> = Vec::new();
     for w in other.iter().flatten() {
         lines_px.push((pts_of(w), false));
     }
-    for w in ways.iter().flatten() {
-        lines_px.push((pts_of(w), true));
+    // a leg just found grows from its first stop to its second
+    let mut whole: Vec<Vec2> = Vec::new();
+    for (k, w) in ways.iter().enumerate() {
+        let Some(w) = w else { continue };
+        let pts = pts_of(w);
+        whole.extend(pts.iter().copied());
+        let g = appear(now - born.get(k).copied().unwrap_or(0.0), 0.0, 0.7);
+        lines_px.push((cut(&pts, g), true));
     }
     let dots: Vec<Vec2> = stops.iter().map(|s| proj(s.1)).collect();
     let chosen: Vec<Vec2> = line.stops[dir].iter().map(|s| proj(s.at())).collect();
@@ -325,10 +375,35 @@ fn overlay(l: &mut Launcher, r: Rect) -> Option<usize> {
         l.ui.p().circle(*d, if h { 6.0 } else { 3.2 }, if h { TEXT() } else { TEXT_SOFT().alpha(0.75) });
         l.ui.p().circle(*d, if h { 3.5 } else { 1.6 }, RAIL());
     }
-    // the line's stops, numbered
+    // a bus running the line, there and back again, at an even pace on the screen
+    let total: f32 = whole.windows(2).map(|s| (s[1] - s[0]).length()).sum();
+    let grown = born.iter().all(|b| now - b > 0.7);
+    if total > 40.0 && grown {
+        let speed = 120.0;
+        let cycle = total / speed;
+        let ph = (now / cycle) % 2.0;
+        let d = if ph < 1.0 { ph } else { 2.0 - ph } * total;
+        if let Some(p) = at_length(&whole, d) {
+            l.ui.p().circle(p, 11.0, col.alpha(0.25));
+            l.ui.p().circle(p, 8.0, RAIL());
+            l.ui.icon("directions_bus", p, 12.0, TEXT());
+        }
+    }
+    // the line's stops, numbered (a stop just added pops up)
     for (k, c) in chosen.iter().enumerate() {
-        l.ui.p().circle(*c, 9.0, TEXT());
-        l.ui.p().circle(*c, 7.5, col);
+        // (a stop at the end of a leg comes when the leg has grown to it)
+        let pop = match k.checked_sub(1).and_then(|i| born.get(i)) {
+            Some(b) => {
+                let x = ((now - b - 0.6) / 0.35).clamp(0.0, 1.0);
+                if x <= 0.0 {
+                    continue;
+                }
+                x + (x * std::f32::consts::PI).sin() * 0.35
+            }
+            None => 1.0,
+        };
+        l.ui.p().circle(*c, 9.0 * pop, TEXT());
+        l.ui.p().circle(*c, 7.5 * pop, col);
         l.ui.text_in(&format!("{}", k + 1), Rect::new(c.x - 9.0, c.y - 9.0, 18.0, 18.0), 9.5, Weight::Bold, ON_ACCENT(), Align::Center);
     }
     if let Some(i) = hovered {
