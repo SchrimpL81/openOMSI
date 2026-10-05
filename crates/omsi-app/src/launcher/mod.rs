@@ -325,6 +325,8 @@ impl Launcher {
         self.showroom = showroom::Showroom::new();
         self.thumbs = showroom::Showroom::new();
         self.gallery.drop_gpu();
+        self.lines.map.drop_gpu();
+        self.lines.tex = None;
         self.livery.drop_gpu();
         self.preview_gen = 0;
         self.map_tex = None;
@@ -864,6 +866,7 @@ impl Launcher {
         // --- the interface
         self.preview_rect = None;
         self.map_rect = None;
+        self.lines.rect = None;
         theme::set(self.state.settings.get("launcher_theme").and_then(|v| v.as_str()).unwrap_or(""));
         self.ui.begin(size, scale, dt);
         self.draw_ui();
@@ -914,6 +917,19 @@ impl Launcher {
                             Some(id) => gpu.set_view(&renderer.device, id, &view, size),
                             None => self.map_tex = Some(gpu.add_view(&renderer.device, &view, size)),
                         }
+                    }
+                }
+            }
+        }
+        // the line editor's own map
+        if self.lines.rect.is_some() {
+            if let (Some(view), Some(gpu)) = (self.lines.map.picture(renderer), self.gpu.as_mut()) {
+                if self.lines.gen != self.lines.map.generation || self.lines.tex.is_none() {
+                    self.lines.gen = self.lines.map.generation;
+                    let size = self.lines.map.pixels();
+                    match self.lines.tex {
+                        Some(id) => gpu.set_view(&renderer.device, id, &view, size),
+                        None => self.lines.tex = Some(gpu.add_view(&renderer.device, &view, size)),
                     }
                 }
             }
