@@ -97,6 +97,7 @@ pub fn apply_weather(
     // the enhanced renderer builds its own sky from these
     l.overcast = overcast;
     l.rain = rain;
+    l.snowfall = if precip_kind == 2 { rain } else { 0.0 };
     let gloom = (overcast * 0.5 + rain * 0.5).clamp(0.0, 1.0);
     l.night = l.night.max(0.45 * gloom);
     // (night maps on with the street lamps, or where the weather makes it that dark: a
@@ -198,6 +199,9 @@ pub fn vehicle_lights(
                     };
                     if let Some(face) = face.filter(|f| *f > apex.y) {
                         apex.y = face + 0.05;
+                    } else if let Some(n) = nose.filter(|n| *n + 0.05 < apex.y) {
+                        // (a spot ahead of the lamps, the Grand Paris-Moulon Citaro's 55 cm: back onto them)
+                        apex.y = n + 0.05;
                     }
                 } else if dl.y < -0.3 {
                     let face = match (tail.filter(|t| *t < apex.y), bb) {
@@ -208,6 +212,8 @@ pub fn vehicle_lights(
                     };
                     if let Some(face) = face.filter(|f| *f < apex.y) {
                         apex.y = face - 0.05;
+                    } else if let Some(t) = tail.filter(|t| *t - 0.05 > apex.y) {
+                        apex.y = t - 0.05;
                     }
                 }
                 // One spot on the vehicle's axis threw one narrow beam: it is split into one
@@ -300,6 +306,7 @@ fn push_spot(lights: &mut Vec<PointLight>, at: DVec3, d: Vec3, vals: &[f32; 12],
         // (a lamp pointing steeply down - a `[spotlight_2]` over a door - keeps its cone: the
         // road lamp's profile is for one aimed along the road)
         beam: if d.normalize_or_zero().z.abs() >= 0.5 { 0.0 } else if vals[9] >= FULL_BEAM_RANGE { -1.0 } else { 1.0 },
+        housed: false,
         mode: LightMode::Enhanced,
     });
 }
